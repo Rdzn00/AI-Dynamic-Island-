@@ -14,6 +14,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.display.DisplayManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -27,7 +28,9 @@ import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.view.Display
 import android.view.Gravity
+import android.view.Surface
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.inputmethod.InputMethodManager
@@ -80,6 +83,25 @@ class IslandService : AccessibilityService(), SensorEventListener {
     private var sensors: SensorManager? = null
     private var audio: AudioManager? = null
     private var imePkgs: Set<String> = emptySet()
+    private var dm: DisplayManager? = null
+    private var wm: WindowManager? = null
+    private var shown = false
+    private var connected = false
+
+    private val displayCb = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY) readDisplay()
+        }
+    }
+
+    private val poll = object : Runnable {
+        override fun run() {
+            applyVisibility()
+            handler.postDelayed(this, 700L)
+        }
+    }
 
     private val audioCb = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
@@ -124,8 +146,8 @@ class IslandService : AccessibilityService(), SensorEventListener {
     private val rx = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> screen(false)
-                Intent.ACTION_SCREEN_ON -> screen(true)
+                Intent.ACTION_SCREEN_OFF -> readDisplay()
+                Intent.ACTION_SCREEN_ON -> readDisplay()
                 NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> refreshDnd(true)
                 else -> refresh()
             }
@@ -136,28 +158,29 @@ class IslandService : AccessibilityService(), SensorEventListener {
         if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName || pkg == "com.android.systemui" || pkg in imePkgs) return
-        if (Bus.fgPkg.value != pkg) Bus.fgPkg.value = pkg
+        if (Bus.fgPkg.value != pkg) {
+            Bus.fgPkg.value = pkg
+            applyVisibility()
+        }
     }
 
     override fun onInterrupt() {}
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        Bus.landscape.value = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        readDisplay()
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        if (view != null) return
+        if (connected) return
+        connected = true
         Bus.load(this)
         running = true
         val imm = getSystemService(InputMethodManager::class.java)
         imePkgs = imm.inputMethodList.map { it.packageName }.toSet()
         owner.start()
         refresh()
-        val pm = getSystemService(PowerManager::class.java)
-        Bus.screenOn.value = pm.isInteractive
-        Bus.landscape.value = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_POWER_CONNECTED)
@@ -168,11 +191,7 @@ class IslandService : AccessibilityService(), SensorEventListener {
             addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
         }
         ContextCompat.registerReceiver(this, rx, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        val sm = getSystemService(SensorManager::class.java)
-        sensors = sm
-        if (pm.isInteractive) {
-            sm.registerListener(this, sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_UI)
-        }
+        sensors = getSystemService(SensorManager::class.java)
         val am = getSystemService(AudioManager::class.java)
         audio = am
         am.registerAudioDeviceCallback(audioCb, handler)
@@ -180,7 +199,11 @@ class IslandService : AccessibilityService(), SensorEventListener {
         refreshDnd(false)
         Bus.startVoice = { startVoice() }
         Bus.stopVoice = { stopVoice() }
-        showIsland()
+        val d = getSystemService(DisplayManager::class.java)
+        dm = d
+        d.registerDisplayListener(displayCb, handler)
+        readDisplay()
+        handler.postDelayed(poll, 700L)
     }
 
     override fun onDestroy() {
@@ -193,28 +216,12 @@ class IslandService : AccessibilityService(), SensorEventListener {
             unregisterReceiver(rx)
         } catch (e: Exception) {
         }
-        sensors?.unregisterListener(this)
+        dm?.unregisterDisplayListener(displayCb)
         audio?.unregisterAudioDeviceCallback(audioCb)
-        view?.let {
-            try {
-                getSystemService(WindowManager::class.java).removeView(it)
-            } catch (e: Exception) {
-            }
-        }
-        view = null
+        detachIsland()
+        connected = false
         owner.stop()
         super.onDestroy()
-    }
-
-    private fun screen(on: Boolean) {
-        Bus.screenOn.value = on
-        val sm = sensors ?: return
-        if (on) {
-            sm.registerListener(this, sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_UI)
-            refresh()
-        } else {
-            sm.unregisterListener(this)
-        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -324,8 +331,47 @@ class IslandService : AccessibilityService(), SensorEventListener {
         )
     }
 
-    private fun showIsland() {
-        val wm = getSystemService(WindowManager::class.java)
+    private fun readDisplay() {
+        val d = dm?.getDisplay(Display.DEFAULT_DISPLAY) ?: return
+        val st = d.state
+        Bus.screenOn.value = st == Display.STATE_ON || st == Display.STATE_ON_SUSPEND
+        val r = d.rotation
+        Bus.landscape.value = r == Surface.ROTATION_90 || r == Surface.ROTATION_270
+        applyVisibility()
+    }
+
+    private fun wantShow(): Boolean {
+        val bank = Bus.shieldOn.value && Bus.fgPkg.value in Bus.banks.value
+        return Bus.islandOn.value && Bus.screenOn.value && !Bus.landscape.value && !bank
+    }
+
+    private fun applyVisibility() {
+        if (!connected) return
+        val want = wantShow()
+        if (want == shown) return
+        if (want) attachIsland() else detachIsland()
+    }
+
+    private fun detachIsland() {
+        sensors?.unregisterListener(this)
+        val v = view
+        if (v != null) {
+            try {
+                wm?.removeView(v)
+            } catch (e: Exception) {
+            }
+        }
+        view = null
+        shown = false
+        Bus.stopVoice()
+        Bus.note.value = null
+        Bus.replyTo.value = null
+        Bus.flash.value = null
+    }
+
+    private fun attachIsland() {
+        val w = getSystemService(WindowManager::class.java)
+        wm = w
         val density = resources.displayMetrics.density
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -337,7 +383,8 @@ class IslandService : AccessibilityService(), SensorEventListener {
             PixelFormat.TRANSLUCENT
         )
         lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        lp.y = (8 * density).toInt()
+        lp.x = (Bus.offX.value * density).toInt()
+        lp.y = (Bus.offY.value * density).toInt()
         if (Build.VERSION.SDK_INT >= 30) {
             lp.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -346,30 +393,37 @@ class IslandService : AccessibilityService(), SensorEventListener {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
+        Bus.note.value = null
+        Bus.replyTo.value = null
+        Bus.flash.value = null
+        refresh()
+
         val v = ComposeView(this)
         v.setViewTreeLifecycleOwner(owner)
         v.setViewTreeSavedStateRegistryOwner(owner)
         v.setContent {
-            val on by Bus.islandOn
             val ox by Bus.offX
             val oy by Bus.offY
-            val awake by Bus.screenOn
-            val land by Bus.landscape
-            val shield by Bus.shieldOn
-            val banks by Bus.banks
-            val fg by Bus.fgPkg
             LaunchedEffect(ox, oy) {
                 lp.x = (ox * density).toInt()
                 lp.y = (oy * density).toInt()
                 try {
-                    wm.updateViewLayout(v, lp)
+                    w.updateViewLayout(v, lp)
                 } catch (e: Exception) {
                 }
             }
-            val paused = shield && fg in banks
-            if (on && awake && !land && !paused) Island(phone.value)
+            Island(phone.value)
         }
-        wm.addView(v, lp)
+        try {
+            w.addView(v, lp)
+        } catch (e: Exception) {
+            return
+        }
         view = v
+        shown = true
+        val sm = sensors
+        if (sm != null) {
+            sm.registerListener(this, sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_UI)
+        }
     }
 }

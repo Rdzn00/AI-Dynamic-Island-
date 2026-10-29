@@ -1,6 +1,7 @@
 package com.aiisland.app
 
 import android.os.SystemClock
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -49,10 +50,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -76,7 +76,8 @@ fun Island(phone: Phone) {
     var micro by remember { mutableStateOf<Mood?>(null) }
     var chargeShow by remember { mutableStateOf(false) }
     var seen by remember { mutableStateOf(false) }
-    val haptic = LocalHapticFeedback.current
+    var mseen by remember { mutableStateOf(false) }
+    val view = LocalView.current
     val scope = rememberCoroutineScope()
     val dragX = remember { Animatable(0f) }
     val dragY = remember { Animatable(0f) }
@@ -116,10 +117,11 @@ fun Island(phone: Phone) {
     }
     LaunchedEffect(media?.title) {
         val md = media
-        if (md != null && md.playing && md.title.isNotEmpty()) {
+        if (mseen && md != null && md.playing && md.title.isNotEmpty()) {
             open = true
             activity += 1
         }
+        mseen = true
     }
     LaunchedEffect(flash?.id) {
         val f = flash
@@ -240,10 +242,10 @@ fun Island(phone: Phone) {
                             open = true
                             activity += 1
                         }
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     },
                     onLongPress = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                         open = true
                         activity += 1
                         Bus.note.value = null
