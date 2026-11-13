@@ -56,7 +56,6 @@ class MainActivity : ComponentActivity() {
         var svc by remember { mutableStateOf(IslandService.running) }
         var notif by remember { mutableStateOf(false) }
         var mic by remember { mutableStateOf(false) }
-        val banks by Bus.banks
         val blocked by Bus.blocked
         val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
             mic = ok
@@ -69,14 +68,6 @@ class MainActivity : ComponentActivity() {
                 mic = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
                     PackageManager.PERMISSION_GRANTED
                 delay(1000L)
-            }
-        }
-        LaunchedEffect(Unit) {
-            if (!Bus.banksInit.value) {
-                val all = withContext(Dispatchers.IO) { loadApps(this@MainActivity, false) }
-                Bus.banks.value = all.filter { looksLikeBank(it.label, it.pkg) }.map { it.pkg }.toSet()
-                Bus.banksInit.value = true
-                Bus.save(this@MainActivity)
             }
         }
         MaterialTheme(colorScheme = darkColorScheme(primary = C.Mint, onPrimary = Color.Black)) {
@@ -92,7 +83,7 @@ class MainActivity : ComponentActivity() {
                             when (t) {
                                 0 -> HomeScreen(svc) { v -> toggleIsland(v) }
                                 1 -> ChatScreen()
-                                2 -> ToolsScreen({ picker = 1 }, { picker = 2 })
+                                2 -> ToolsScreen({ picker = 1 })
                                 else -> SettingScreen(
                                     svc,
                                     notif,
@@ -115,17 +106,6 @@ class MainActivity : ComponentActivity() {
                     TabBar(tab) { tab = it }
                 }
                 if (picker == 1) {
-                    AppPicker(
-                        L.t("picker_banks"),
-                        banks,
-                        { s ->
-                            Bus.banks.value = s
-                            Bus.save(this@MainActivity)
-                        },
-                        { picker = 0 }
-                    )
-                }
-                if (picker == 2) {
                     AppPicker(
                         L.t("picker_block"),
                         blocked,
