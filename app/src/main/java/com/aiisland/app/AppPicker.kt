@@ -45,25 +45,6 @@ import kotlinx.coroutines.withContext
 
 data class AppItem(val label: String, val pkg: String, val icon: ImageBitmap?)
 
-private val bankWords = setOf(
-    "maybank", "mae", "cimb", "octo", "rhb", "hlb", "ambank", "affin", "bsn", "mybsn",
-    "muamalat", "uob", "ocbc", "hsbc", "agrobank", "mbsb", "tng", "boost", "grabpay",
-    "paypal", "wise", "revolut", "binance", "maya", "gcash"
-)
-
-private val bankPhrases = listOf(
-    "hong leong", "pb engage", "standard chartered", "touch n go", "touch 'n go", "alliance"
-)
-
-fun looksLikeBank(label: String, pkg: String): Boolean {
-    val l = label.lowercase()
-    val p = pkg.lowercase()
-    if (l.contains("bank") || p.contains("bank")) return true
-    val words = l.split(" ", "-", "'", ".").filter { it.isNotEmpty() }.toSet()
-    if (words.any { it in bankWords }) return true
-    return bankPhrases.any { l.contains(it) }
-}
-
 fun loadApps(c: Context, icons: Boolean): List<AppItem> {
     val pm = c.packageManager
     val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
