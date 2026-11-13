@@ -45,6 +45,9 @@ fun Robot(mood: Mood, boxSize: Dp, modifier: Modifier = Modifier, tilt: Float = 
         Mood.DANCE -> 380
         Mood.ENERGY -> 450
         Mood.PARTY -> 320
+        Mood.RING -> 300
+        Mood.VIBRATE -> 120
+        Mood.MUTE -> 3000
         Mood.SLEEPY -> 3200
         else -> 1800
     }
@@ -103,16 +106,21 @@ fun Robot(mood: Mood, boxSize: Dp, modifier: Modifier = Modifier, tilt: Float = 
             Mood.DANCE -> wob * 1.4f
             Mood.PARTY -> wob * 1.5f
             Mood.ENERGY -> wob * 0.5f
+            Mood.RING -> wob * 1.2f
+            Mood.VIBRATE -> wob * 0.25f
             else -> 0f
         }
         rotate(angle, Offset(32f * s, 40f * s)) {
-            translate(top = -2.5f * s * bob) {
+            translate(left = if (mood == Mood.VIBRATE) wob * 0.2f * s else 0f, top = -2.5f * s * bob) {
                 val antenna = when (mood) {
                     Mood.SLEEPY -> Amber
                     Mood.DIZZY -> Amber
                     Mood.SURPRISED -> Amber
                     Mood.ENERGY -> Amber
                     Mood.PARTY -> Amber
+                    Mood.RING -> Amber
+                    Mood.VIBRATE -> Amber
+                    Mood.MUTE -> Gray
                     Mood.SLEEP -> Gray
                     else -> Mint
                 }
@@ -133,7 +141,7 @@ fun Robot(mood: Mood, boxSize: Dp, modifier: Modifier = Modifier, tilt: Float = 
                 val gx = if (still) 0f else (gaze.value + tiltAnim).coerceIn(-1f, 1f) * 3.5f
 
                 val smile = mood == Mood.HAPPY || mood == Mood.DANCE || mood == Mood.ENERGY ||
-                    mood == Mood.PARTY || mood == Mood.HEADPHONES
+                    mood == Mood.PARTY || mood == Mood.HEADPHONES || mood == Mood.RING
                 if (smile) {
                     for (x in floatArrayOf(20f, 35f)) {
                         val p = Path().apply {
@@ -156,7 +164,7 @@ fun Robot(mood: Mood, boxSize: Dp, modifier: Modifier = Modifier, tilt: Float = 
                             rr(Mint, x, 29f, 7f, 12f, 3.5f)
                         }
                     }
-                } else if (mood == Mood.SURPRISED || mood == Mood.LISTENING) {
+                } else if (mood == Mood.SURPRISED || mood == Mood.LISTENING || mood == Mood.VIBRATE) {
                     for (x in floatArrayOf(20.5f, 35.5f)) {
                         rr(Mint, x + gx, 27f, 8f, 14f, 4f)
                     }
@@ -172,6 +180,14 @@ fun Robot(mood: Mood, boxSize: Dp, modifier: Modifier = Modifier, tilt: Float = 
                         quadraticBezierTo(32f * s, 47f * s, 35.5f * s, 43.5f * s)
                     }
                     drawPath(p, Mint, style = Stroke(width = 2.2f * s, cap = StrokeCap.Round))
+                } else if (mood == Mood.MUTE) {
+                    for (x in floatArrayOf(21f, 36f)) {
+                        rr(Mint, x + gx, 33f, 7f, 5f, 2.5f)
+                    }
+                    rr(Gray, 23f, 43f, 18f, 2.4f, 1.2f)
+                    for (x in floatArrayOf(26f, 30f, 34f, 38f)) {
+                        rr(Gray, x, 41f, 1.6f, 6f, 0.8f)
+                    }
                 } else {
                     val open = if (mood == Mood.SLEEPY) 0.4f else blink.value
                     val eyeH = 12f * open
@@ -208,6 +224,22 @@ fun Robot(mood: Mood, boxSize: Dp, modifier: Modifier = Modifier, tilt: Float = 
                     drawPath(band, Cyan, style = Stroke(width = 3f * s, cap = StrokeCap.Round))
                     rr(Cyan, 0.5f, 25f, 8f, 18f, 4f)
                     rr(Cyan, 55.5f, 25f, 8f, 18f, 4f)
+                } else if (mood == Mood.RING) {
+                    for (side in floatArrayOf(-1f, 1f)) {
+                        for (k in 0 until 2) {
+                            val r = 4f + k * 3.5f
+                            val cx = 32f + side * 9f
+                            drawArc(
+                                Amber.copy(alpha = if (k == 0) 1f else pulse),
+                                if (side > 0f) -50f else 130f,
+                                100f,
+                                false,
+                                Offset((cx - r) * s, (9f - r) * s),
+                                Size(2f * r * s, 2f * r * s),
+                                style = Stroke(width = 1.6f * s, cap = StrokeCap.Round)
+                            )
+                        }
+                    }
                 }
             }
         }
