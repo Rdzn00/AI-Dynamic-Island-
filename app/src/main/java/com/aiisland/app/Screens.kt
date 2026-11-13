@@ -146,7 +146,7 @@ private fun Header(active: Boolean) {
             Robot(if (active) Mood.HAPPY else Mood.SLEEPY, 72.dp)
         }
         Spacer(Modifier.height(10.dp))
-        Text("Mochi Dynamic Island v0.5.5", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text("Mochi Dynamic Island v0.6.0", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(L.t("home_sub"), color = C.Soft, fontSize = 13.sp)
     }
 }
@@ -259,6 +259,300 @@ fun ChatScreen() {
                     .glass(C.Mint, C.Cyan)
                     .padding(16.dp)
             ) {
+                Text(L.t("chat_last"), color = C.Soft, fontSize = 12.sp)
+                Text(said, color = Color.White, fontSize = 16.sp)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .glass(Color.White, Color.White, 28.dp)
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(L.t("chat_hint"), color = C.Soft, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun OutlineBtn(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .glass(Color.White, Color.White, 18.dp)
+            .clickable { onClick() }
+            .padding(14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ToolCard(
+    color: Color,
+    icon: String,
+    title: String,
+    desc: String,
+    on: Boolean,
+    onToggle: (Boolean) -> Unit,
+    note: String,
+    btn: String,
+    onBtn: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .glass(color, color, 24.dp)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Ico(icon, color, 26.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(title, color = color, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text(desc, color = Color(0xFFD7DEE8), fontSize = 14.sp)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .glass(Color.White, Color.White, 18.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (on) L.t("on") else L.t("off"),
+                color = if (on) C.Mint else C.Soft,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            MochiSwitch(on, onToggle)
+        }
+        Text(note, color = C.Soft, fontSize = 13.sp)
+        OutlineBtn(btn, onBtn)
+    }
+}
+
+@Composable
+fun ToolsScreen(onBlock: () -> Unit) {
+    val ctx = LocalContext.current
+    val block by Bus.blockOn
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        PageTitle(L.t("tools_title"), L.t("tools_sub"))
+        ToolCard(
+            Orange, "block", L.t("excl_title"), L.t("excl_desc"),
+            block, { v ->
+                Bus.blockOn.value = v
+                Bus.save(ctx)
+            },
+            L.t("excl_note"), L.t("excl_list"), onBlock
+        )
+    }
+}
+
+@Composable
+private fun SetupRow(title: String, ok: Boolean, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .glass(if (ok) C.Mint else C.Amber)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 15.sp)
+            Text(
+                if (ok) L.t("active") else L.t("not_yet"),
+                color = if (ok) C.Mint else C.Amber,
+                fontSize = 12.sp
+            )
+        }
+        if (!ok) {
+            Button(onClick = onClick) { Text(label) }
+        }
+    }
+}
+
+private fun langName(code: String): String = when (code) {
+    "en" -> "English"
+    "zh" -> "中文"
+    else -> "Bahasa Melayu"
+}
+
+@Composable
+private fun LangChip(code: String, current: String, modifier: Modifier, onPick: () -> Unit) {
+    val sel = code == current
+    Box(
+        modifier
+            .glass(if (sel) C.Mint else Color.White, if (sel) C.Mint else Color.White, 16.dp)
+            .clickable { onPick() }
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            langName(code),
+            color = if (sel) C.Mint else Color.White,
+            fontSize = 14.sp,
+            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun LanguageCard() {
+    val ctx = LocalContext.current
+    val lang by L.lang
+    var open by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .glass(C.Mint, C.Cyan, 24.dp)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Ico("globe", C.Mint, 26.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(L.t("lang_title"), color = Gold, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text(L.t("lang_desc"), color = Color(0xFFD7DEE8), fontSize = 14.sp)
+        Box {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .glass(Color.White, Color.White, 16.dp)
+                    .clickable { open = true }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(langName(lang), color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                Text("▾", color = C.Soft, fontSize = 18.sp)
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                for (code in listOf("ms", "en", "zh")) {
+                    DropdownMenuItem(
+                        text = { Text(langName(code)) },
+                        onClick = {
+                            L.lang.value = code
+                            Bus.save(ctx)
+                            open = false
+                        }
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (code in listOf("ms", "en", "zh")) {
+                LangChip(code, lang, Modifier.weight(1f)) {
+                    L.lang.value = code
+                    Bus.save(ctx)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalRow(label: String, value: String, v: Int, lo: Int, hi: Int, onChange: (Int) -> Unit, done: () -> Unit) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(value, color = C.Soft, fontSize = 13.sp)
+        }
+        Slider(
+            value = v.toFloat(),
+            onValueChange = { onChange(it.toInt()) },
+            onValueChangeFinished = done,
+            valueRange = lo.toFloat()..hi.toFloat()
+        )
+    }
+}
+
+@Composable
+private fun CalibratorCard() {
+    val ctx = LocalContext.current
+    val pw by Bus.pillW
+    val ph by Bus.pillH
+    val ox by Bus.offX
+    val oy by Bus.offY
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .glass(C.Cyan, C.Mint, 24.dp)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Ico("scan", C.Cyan, 26.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(L.t("calib_title"), color = Gold, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text(L.t("calib_desc"), color = Color(0xFFD7DEE8), fontSize = 14.sp)
+        CalRow(L.t("width"), "$pw dp  (80 - 200)", pw, 80, 200, { Bus.pillW.value = it }) { Bus.save(ctx) }
+        CalRow(L.t("height"), "$ph dp  (30 - 60)", ph, 30, 60, { Bus.pillH.value = it }) { Bus.save(ctx) }
+        CalRow(L.t("xoff"), "$ox  (-100 - 100)", ox, -100, 100, { Bus.offX.value = it }) { Bus.save(ctx) }
+        CalRow(L.t("yoff"), "$oy  (0 - 60)", oy, 0, 60, { Bus.offY.value = it }) { Bus.save(ctx) }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .glass(Color.White, Color.White, 18.dp)
+                .clickable {
+                    Bus.pillW.value = 132
+                    Bus.pillH.value = 38
+                    Bus.offX.value = 0
+                    Bus.offY.value = 8
+                    Bus.save(ctx)
+                }
+                .padding(12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(L.t("reset"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(L.t("reset_sub"), color = C.Soft, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingScreen(
+    svcOn: Boolean,
+    notifOn: Boolean,
+    micOn: Boolean,
+    onAccess: () -> Unit,
+    onNotif: () -> Unit,
+    onMic: () -> Unit,
+    onInfo: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        PageTitle(L.t("set_title"), L.t("set_sub"))
+        LanguageCard()
+        CalibratorCard()
+        Text(L.t("perms"), color = C.Soft, fontSize = 14.sp)
+        SetupRow(L.t("perm_island"), svcOn, L.t("btn_enable"), onAccess)
+        SetupRow(L.t("perm_notif"), notifOn, L.t("btn_give"), onNotif)
+        SetupRow(L.t("perm_mic"), micOn, L.t("btn_give"), onMic)
+        Text(L.t("restricted"), color = C.Soft, fontSize = 12.sp)
+        Button(onClick = onInfo) { Text(L.t("open_info")) }
+    }
+}
+           ) {
                 Text(L.t("chat_last"), color = C.Soft, fontSize = 12.sp)
                 Text(said, color = Color.White, fontSize = 16.sp)
             }
