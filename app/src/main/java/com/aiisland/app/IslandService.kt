@@ -33,7 +33,6 @@ import android.view.Gravity
 import android.view.Surface
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.view.inputmethod.InputMethodManager
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,11 +81,15 @@ class IslandService : AccessibilityService(), SensorEventListener {
     private var recognizer: SpeechRecognizer? = null
     private var sensors: SensorManager? = null
     private var audio: AudioManager? = null
-    private var imePkgs: Set<String> = emptySet()
+    private var listening = false
+    private var committed = ""
+    private var lastRinger = -1
     private var dm: DisplayManager? = null
     private var wm: WindowManager? = null
     private var shown = false
     private var connected = false
+
+    private val restart = Runnable { beginListen() }
 
     private val displayCb = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {}
@@ -122,24 +125,30 @@ class IslandService : AccessibilityService(), SensorEventListener {
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onError(error: Int) {
-            val msg = when (error) {
-                SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> L.t("no_speech")
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> L.t("need_mic")
-                SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> L.t("need_net")
-                else -> L.t("voice_err", error.toString())
+            if (!listening) return
+            when (error) {
+                SpeechRecognizer.ERROR_NO_MATCH,
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> again(300L)
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> again(700L)
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> fail(L.t("need_mic"))
+                SpeechRecognizer.ERROR_NETWORK,
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> fail(L.t("need_net"))
+                else -> fail(L.t("voice_err", error.toString()))
             }
-            fail(msg)
         }
 
         override fun onResults(results: Bundle?) {
+            if (!listening) return
             val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-            Bus.voiceText.value = t
-            Bus.voice.value = Voice.RESULT
+            if (t.isNotEmpty()) committed = joinText(committed, t)
+            Bus.voiceText.value = committed
+            again(250L)
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
+            if (!listening) return
             val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-            if (t.isNotEmpty()) Bus.voiceText.value = t
+            if (t.isNotEmpty()) Bus.voiceText.value = joinText(committed, t)
         }
     }
 
@@ -149,20 +158,14 @@ class IslandService : AccessibilityService(), SensorEventListener {
                 Intent.ACTION_SCREEN_OFF -> readDisplay()
                 Intent.ACTION_SCREEN_ON -> readDisplay()
                 NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> refreshDnd(true)
+                AudioManager.RINGER_MODE_CHANGED_ACTION -> refreshRinger(true)
+                Intent.ACTION_USER_PRESENT -> Bus.faceId.value = System.nanoTime()
                 else -> refresh()
             }
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName || pkg == "com.android.systemui" || pkg in imePkgs) return
-        if (Bus.fgPkg.value != pkg) {
-            Bus.fgPkg.value = pkg
-            applyVisibility()
-        }
-    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
     override fun onInterrupt() {}
 
@@ -177,8 +180,6 @@ class IslandService : AccessibilityService(), SensorEventListener {
         connected = true
         Bus.load(this)
         running = true
-        val imm = getSystemService(InputMethodManager::class.java)
-        imePkgs = imm.inputMethodList.map { it.packageName }.toSet()
         owner.start()
         refresh()
         val filter = IntentFilter().apply {
@@ -189,6 +190,8 @@ class IslandService : AccessibilityService(), SensorEventListener {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
+            addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
         ContextCompat.registerReceiver(this, rx, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         sensors = getSystemService(SensorManager::class.java)
@@ -197,8 +200,10 @@ class IslandService : AccessibilityService(), SensorEventListener {
         am.registerAudioDeviceCallback(audioCb, handler)
         refreshAudio(false)
         refreshDnd(false)
+        refreshRinger(false)
         Bus.startVoice = { startVoice() }
         Bus.stopVoice = { stopVoice() }
+        Bus.endVoice = { endVoice() }
         val d = getSystemService(DisplayManager::class.java)
         dm = d
         d.registerDisplayListener(displayCb, handler)
@@ -211,6 +216,7 @@ class IslandService : AccessibilityService(), SensorEventListener {
         stopVoice()
         Bus.startVoice = {}
         Bus.stopVoice = {}
+        Bus.endVoice = {}
         handler.removeCallbacksAndMessages(null)
         try {
             unregisterReceiver(rx)
@@ -268,6 +274,224 @@ class IslandService : AccessibilityService(), SensorEventListener {
     }
 
     private fun refreshDnd(announce: Boolean) {
+        val nm = getSystemService(NotificationManager::class.java)
+        val f = nm.currentInterruptionFilter
+        val on = f != NotificationManager.INTERRUPTION_FILTER_ALL &&
+            f != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+        if (on != phone.value.dnd) {
+            phone.value = phone.value.copy(dnd = on)
+            if (announce) {
+                Bus.flash.value = Flash(
+                    System.nanoTime(),
+                    if (on) Mood.SLEEP else Mood.HAPPY,
+                    L.t("dnd"),
+                    if (on) L.t("turned_on") else L.t("turned_off")
+                )
+            }
+        }
+    }
+
+    private fun refreshRinger(announce: Boolean) {
+        val am = audio ?: return
+        val m = am.ringerMode
+        if (m == lastRinger) return
+        val first = lastRinger == -1
+        lastRinger = m
+        if (announce && !first) {
+            val mood = when (m) {
+                AudioManager.RINGER_MODE_NORMAL -> Mood.RING
+                AudioManager.RINGER_MODE_VIBRATE -> Mood.VIBRATE
+                else -> Mood.MUTE
+            }
+            val sub = when (m) {
+                AudioManager.RINGER_MODE_NORMAL -> L.t("ringer_normal")
+                AudioManager.RINGER_MODE_VIBRATE -> L.t("ringer_vibrate")
+                else -> L.t("ringer_silent")
+            }
+            Bus.flash.value = Flash(System.nanoTime(), mood, L.t("ringer_title"), sub)
+        }
+    }
+
+    private fun joinText(a: String, b: String): String {
+        if (a.isEmpty()) return b
+        if (b.isEmpty()) return a
+        return "$a $b"
+    }
+
+    private fun langTag(): String = when (L.lang.value) {
+        "en" -> "en-US"
+        "zh" -> "zh-CN"
+        else -> "ms-MY"
+    }
+
+    private fun again(ms: Long) {
+        handler.removeCallbacks(restart)
+        handler.postDelayed(restart, ms)
+    }
+
+    private fun fail(msg: String) {
+        listening = false
+        handler.removeCallbacks(restart)
+        recognizer?.destroy()
+        recognizer = null
+        Bus.voiceText.value = msg
+        Bus.voice.value = Voice.ERROR
+    }
+
+    private fun beginListen() {
+        if (!listening) return
+        recognizer?.destroy()
+        val r = SpeechRecognizer.createSpeechRecognizer(this)
+        r.setRecognitionListener(listener)
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag())
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+        r.startListening(i)
+        recognizer = r
+    }
+
+    private fun startVoice() {
+        stopVoice()
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            fail(L.t("need_mic"))
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            fail(L.t("no_recog"))
+            return
+        }
+        committed = ""
+        Bus.voiceText.value = ""
+        Bus.voice.value = Voice.LISTENING
+        listening = true
+        beginListen()
+    }
+
+    private fun endVoice() {
+        listening = false
+        handler.removeCallbacks(restart)
+        recognizer?.destroy()
+        recognizer = null
+    }
+
+    private fun stopVoice() {
+        endVoice()
+        Bus.voice.value = Voice.IDLE
+    }
+
+    private fun refresh() {
+        val b = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = b?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = b?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+        val status = b?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        phone.value = phone.value.copy(
+            battery = if (level >= 0 && scale > 0) level * 100 / scale else 80,
+            charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL,
+            hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        )
+    }
+
+    private fun readDisplay() {
+        val d = dm?.getDisplay(Display.DEFAULT_DISPLAY) ?: return
+        val st = d.state
+        Bus.screenOn.value = st == Display.STATE_ON || st == Display.STATE_ON_SUSPEND
+        val r = d.rotation
+        Bus.landscape.value = r == Surface.ROTATION_90 || r == Surface.ROTATION_270
+        applyVisibility()
+    }
+
+    private fun wantShow(): Boolean {
+        return Bus.islandOn.value && Bus.screenOn.value && !Bus.landscape.value
+    }
+
+    private fun applyVisibility() {
+        if (!connected) return
+        val want = wantShow()
+        if (want == shown) return
+        if (want) attachIsland() else detachIsland()
+    }
+
+    private fun detachIsland() {
+        sensors?.unregisterListener(this)
+        val v = view
+        if (v != null) {
+            try {
+                wm?.removeView(v)
+            } catch (e: Exception) {
+            }
+        }
+        view = null
+        shown = false
+        Bus.stopVoice()
+        Bus.note.value = null
+        Bus.replyTo.value = null
+        Bus.flash.value = null
+    }
+
+    private fun attachIsland() {
+        val w = getSystemService(WindowManager::class.java)
+        wm = w
+        val density = resources.displayMetrics.density
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        lp.x = (Bus.offX.value * density).toInt()
+        lp.y = (Bus.offY.value * density).toInt()
+        if (Build.VERSION.SDK_INT >= 30) {
+            lp.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= 28) {
+            lp.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+
+        Bus.note.value = null
+        Bus.replyTo.value = null
+        Bus.flash.value = null
+        Bus.faceId.value = 0L
+        refresh()
+
+        val v = ComposeView(this)
+        v.setViewTreeLifecycleOwner(owner)
+        v.setViewTreeSavedStateRegistryOwner(owner)
+        v.setContent {
+            val ox by Bus.offX
+            val oy by Bus.offY
+            LaunchedEffect(ox, oy) {
+                lp.x = (ox * density).toInt()
+                lp.y = (oy * density).toInt()
+                try {
+                    w.updateViewLayout(v, lp)
+                } catch (e: Exception) {
+                }
+            }
+            Island(phone.value)
+        }
+        try {
+            w.addView(v, lp)
+        } catch (e: Exception) {
+            return
+        }
+        view = v
+        shown = true
+        val sm = sensors
+        if (sm != null) {
+            sm.registerListener(this, sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+}
+olean) {
         val nm = getSystemService(NotificationManager::class.java)
         val f = nm.currentInterruptionFilter
         val on = f != NotificationManager.INTERRUPTION_FILTER_ALL &&
