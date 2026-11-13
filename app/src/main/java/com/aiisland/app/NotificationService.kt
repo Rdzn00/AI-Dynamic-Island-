@@ -1,6 +1,7 @@
 package com.aiisland.app
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.ComponentName
 import android.content.Intent
@@ -9,6 +10,7 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -18,6 +20,9 @@ class NotificationService : NotificationListenerService() {
     private var manager: MediaSessionManager? = null
     private var lastArt: Bitmap? = null
     private var lastAccent = 0xFF7CF0C8.toInt()
+
+    private val answerWords = listOf("answer", "accept", "angkat", "jawab", "terima", "接听")
+    private val declineWords = listOf("decline", "reject", "tolak", "dismiss", "拒绝", "拒接")
 
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
         pick(list)
@@ -68,6 +73,7 @@ class NotificationService : NotificationListenerService() {
         ctrl?.unregisterCallback(callback)
         ctrl = null
         Bus.media.value = null
+        Bus.call.value = null
         Bus.dismissNote = {}
         Bus.sendReply = { _, _ -> false }
     }
@@ -164,15 +170,55 @@ class NotificationService : NotificationListenerService() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun pendingOf(extras: Bundle, key: String): PendingIntent? = extras.getParcelable<PendingIntent>(key)
+
+    private fun handleCall(s: StatusBarNotification, n: Notification, extras: Bundle) {
+        var answer: PendingIntent? = null
+        var decline: PendingIntent? = null
+        var type = 0
+        if (Build.VERSION.SDK_INT >= 31) {
+            type = extras.getInt(Notification.EXTRA_CALL_TYPE, 0)
+            answer = pendingOf(extras, Notification.EXTRA_ANSWER_INTENT)
+            decline = pendingOf(extras, Notification.EXTRA_DECLINE_INTENT)
+        }
+        val acts = n.actions
+        if (acts != null) {
+            for (a in acts) {
+                val t = a.title?.toString()?.lowercase().orEmpty()
+                if (answer == null && answerWords.any { t.contains(it) }) answer = a.actionIntent
+                if (decline == null && declineWords.any { t.contains(it) }) decline = a.actionIntent
+            }
+        }
+        val incoming = type == 1 || answer != null
+        if (incoming) {
+            val name = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+            Bus.call.value = CallInfo(s.key, name, answer, decline, n.contentIntent)
+        } else {
+            val cur = Bus.call.value
+            if (cur != null && cur.key == s.key) Bus.call.value = null
+        }
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        val s = sbn ?: return
+        val c = Bus.call.value
+        if (c != null && c.key == s.key) Bus.call.value = null
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val s = sbn ?: return
         val n = s.notification ?: return
         if (s.packageName == packageName) return
+        val extras = n.extras ?: return
+        if (n.category == Notification.CATEGORY_CALL) {
+            handleCall(s, n, extras)
+            return
+        }
         if (Bus.blockOn.value && s.packageName in Bus.blocked.value) return
         if (s.isOngoing) return
         if ((n.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
         if (n.category == Notification.CATEGORY_TRANSPORT) return
-        val extras = n.extras ?: return
         if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val body = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
@@ -183,6 +229,14 @@ class NotificationService : NotificationListenerService() {
             val ri = a.remoteInputs
             ri != null && ri.isNotEmpty()
         }
-        Bus.note.value = Note(System.nanoTime(), s.key, label(s.packageName), title, text, reply)
+        Bus.note.value = Note(
+            System.nanoTime(),
+            s.key,
+            label(s.packageName),
+            title,
+            text,
+            reply,
+            n.contentIntent
+        )
     }
 }
