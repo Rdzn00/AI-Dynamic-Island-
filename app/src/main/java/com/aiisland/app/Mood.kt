@@ -12,7 +12,10 @@ enum class Mood(val label: String) {
     DANCE("Menari"),
     ENERGY("Bertenaga"),
     HEADPHONES("Fon kepala"),
-    PARTY("Raikan!")
+    PARTY("Raikan!"),
+    RING("Berdering"),
+    VIBRATE("Bergetar"),
+    MUTE("Senyap")
 }
 
 data class Phone(
