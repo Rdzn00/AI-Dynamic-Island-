@@ -1,8 +1,10 @@
 package com.aiisland.app
 
+import android.content.Intent
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -52,6 +55,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,7 +68,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class Mode { SMALL, INFO, NOTE, VOICE, MUSIC, CHARGE, FLASH }
+private enum class Mode { SMALL, INFO, NOTE, VOICE, MUSIC, CHARGE, FLASH, CALL, FACE }
 
 private val Soft = Color(0xFF9AA3B2)
 private val Mint = Color(0xFF7CF0C8)
@@ -75,15 +79,21 @@ fun Island(phone: Phone) {
     var activity by remember { mutableStateOf(0) }
     var micro by remember { mutableStateOf<Mood?>(null) }
     var chargeShow by remember { mutableStateOf(false) }
+    var faceShow by remember { mutableStateOf(false) }
+    var wasCall by remember { mutableStateOf(false) }
     var seen by remember { mutableStateOf(false) }
     var mseen by remember { mutableStateOf(false) }
     val view = LocalView.current
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val dragX = remember { Animatable(0f) }
     val dragY = remember { Animatable(0f) }
     val note by Bus.note
     val replyTo by Bus.replyTo
     val flash by Bus.flash
+    val call by Bus.call
+    val faceId by Bus.faceId
+    val textActive by Bus.textActive
     val voice by Bus.voice
     val voiceText by Bus.voiceText
     val media by Bus.media
@@ -93,11 +103,16 @@ fun Island(phone: Phone) {
     fun close() {
         open = false
         chargeShow = false
+        faceShow = false
         Bus.note.value = null
         Bus.replyTo.value = null
         Bus.flash.value = null
         Bus.stopVoice()
         Bus.voice.value = Voice.IDLE
+    }
+
+    fun idle(): Boolean {
+        return Bus.note.value == null && Bus.voice.value == Voice.IDLE && Bus.call.value == null
     }
 
     LaunchedEffect(note?.id) {
@@ -131,7 +146,7 @@ fun Island(phone: Phone) {
             delay(3000L)
             if (Bus.flash.value?.id == f.id) {
                 Bus.flash.value = null
-                if (Bus.note.value == null && Bus.voice.value == Voice.IDLE) close()
+                if (idle()) close()
             }
         }
     }
@@ -145,14 +160,34 @@ fun Island(phone: Phone) {
             activity += 1
             delay(4500L)
             chargeShow = false
-            if (Bus.note.value == null && Bus.voice.value == Voice.IDLE && Bus.flash.value == null) close()
+            if (idle() && Bus.flash.value == null) close()
         }
         seen = true
     }
-    LaunchedEffect(open, activity) {
+    LaunchedEffect(faceId) {
+        if (faceId != 0L) {
+            faceShow = true
+            open = true
+            activity += 1
+            delay(2400L)
+            faceShow = false
+            if (idle() && Bus.flash.value == null) close()
+        }
+    }
+    LaunchedEffect(call?.key) {
+        if (call != null) {
+            wasCall = true
+            open = true
+            activity += 1
+        } else if (wasCall) {
+            wasCall = false
+            close()
+        }
+    }
+    LaunchedEffect(open, activity, textActive) {
         if (open) {
             delay(10_000L)
-            close()
+            if (voice != Voice.LISTENING && !Bus.textActive.value && Bus.call.value == null) close()
         }
     }
     LaunchedEffect(Unit) {
@@ -168,14 +203,17 @@ fun Island(phone: Phone) {
     val m = micro
     val fl = flash
     val cur = note
+    val cl = call
     val md = media
     val dancing = md?.playing == true && !phone.dizzy && !phone.faceDown
     val mood = when {
+        cl != null -> Mood.RING
         voice == Voice.LISTENING -> Mood.LISTENING
         voice == Voice.RESULT || voice == Voice.SENT -> Mood.HAPPY
         voice == Voice.ERROR -> Mood.SURPRISED
         cur != null && open -> Mood.HAPPY
         fl != null && open -> fl.mood
+        faceShow && open -> Mood.HAPPY
         chargeShow && open -> if (phone.battery >= 100) Mood.PARTY else Mood.ENERGY
         dancing -> Mood.DANCE
         m != null && base == Mood.NEUTRAL -> m
@@ -183,14 +221,15 @@ fun Island(phone: Phone) {
     }
     val mode = when {
         !open -> Mode.SMALL
+        cl != null -> Mode.CALL
         voice != Voice.IDLE -> Mode.VOICE
         cur != null -> Mode.NOTE
+        faceShow -> Mode.FACE
         fl != null -> Mode.FLASH
         chargeShow -> Mode.CHARGE
         md != null -> Mode.MUSIC
         else -> Mode.INFO
     }
-    val confirming = voice == Voice.RESULT && replyTo != null
 
     val tw = when (mode) {
         Mode.SMALL -> pw.dp
@@ -200,15 +239,19 @@ fun Island(phone: Phone) {
         Mode.MUSIC -> 340.dp
         Mode.CHARGE -> 300.dp
         Mode.FLASH -> 300.dp
+        Mode.CALL -> 340.dp
+        Mode.FACE -> 230.dp
     }
     val th = when (mode) {
         Mode.SMALL -> ph.dp
         Mode.INFO -> 76.dp
-        Mode.NOTE -> 104.dp
-        Mode.VOICE -> if (confirming) 140.dp else 96.dp
+        Mode.NOTE -> 108.dp
+        Mode.VOICE -> if (voice == Voice.LISTENING) 148.dp else 96.dp
         Mode.MUSIC -> 176.dp
         Mode.CHARGE -> 88.dp
         Mode.FLASH -> 76.dp
+        Mode.CALL -> 136.dp
+        Mode.FACE -> 88.dp
     }
     val tr = if (mode == Mode.SMALL) (ph / 2f).dp else 30.dp
     val anim = spring<Dp>(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow)
@@ -236,7 +279,14 @@ fun Island(phone: Phone) {
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
-                        if (open) {
+                        val c = Bus.call.value
+                        val n = Bus.note.value
+                        if (c != null) {
+                            firePending(ctx, c.open)
+                        } else if (open && n != null && Bus.voice.value == Voice.IDLE && n.content != null) {
+                            firePending(ctx, n.content)
+                            close()
+                        } else if (open) {
                             close()
                         } else {
                             open = true
@@ -245,12 +295,14 @@ fun Island(phone: Phone) {
                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     },
                     onLongPress = {
-                        view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                        open = true
-                        activity += 1
-                        Bus.note.value = null
-                        Bus.replyTo.value = null
-                        Bus.startVoice()
+                        if (Bus.call.value == null) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                            open = true
+                            activity += 1
+                            Bus.note.value = null
+                            Bus.replyTo.value = null
+                            Bus.startVoice()
+                        }
                     }
                 )
             }
@@ -259,7 +311,7 @@ fun Island(phone: Phone) {
                     onDragEnd = {
                         scope.launch {
                             val far = abs(dragX.value) > 140f || dragY.value < -90f
-                            if (far && open) {
+                            if (far && open && Bus.call.value == null) {
                                 val n = Bus.note.value
                                 if (n != null) Bus.dismissNote(n)
                                 close()
@@ -281,6 +333,198 @@ fun Island(phone: Phone) {
                     change.consume()
                     if (open) {
                         scope.launch {
+                            dragX.snapTo(dragX.value + amount.x)
+                            dragY.snapTo((dragY.value + amount.y).coerceAtMost(0f))
+                        }
+                    }
+                }
+            }
+    ) {
+        if (mode == Mode.MUSIC && md != null) {
+            MusicLayout(md, mood, phone.tilt) { activity += 1 }
+        } else if (mode == Mode.CHARGE) {
+            ChargeLayout(phone.battery, mood)
+        } else if (mode == Mode.CALL && cl != null) {
+            CallLayout(cl, mood, phone.tilt)
+        } else if (mode == Mode.FACE) {
+            FaceIdLayout()
+        } else {
+            Row(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth()
+                    .padding(start = if (mode == Mode.SMALL) 8.dp else 14.dp, end = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Robot(mood, if (mode == Mode.SMALL) (ph * 0.74f).dp else 48.dp, tilt = phone.tilt)
+                if (mode != Mode.SMALL) {
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        if (mode == Mode.NOTE && cur != null) {
+                            NoteInfo(cur)
+                        } else if (mode == Mode.VOICE) {
+                            VoiceInfo(
+                                voice,
+                                voiceText,
+                                replyTo,
+                                {
+                                    val target = Bus.replyTo.value
+                                    val txt = Bus.voiceText.value.trim()
+                                    if (target != null) {
+                                        if (txt.isNotEmpty()) {
+                                            Bus.endVoice()
+                                            val ok = Bus.sendReply(target, txt)
+                                            Bus.voiceText.value = if (ok) txt else L.t("send_failed")
+                                            Bus.voice.value = if (ok) Voice.SENT else Voice.ERROR
+                                        }
+                                    } else {
+                                        Bus.endVoice()
+                                        Bus.voice.value = Voice.RESULT
+                                    }
+                                    activity += 1
+                                },
+                                { close() }
+                            )
+                        } else if (mode == Mode.FLASH && fl != null) {
+                            FlashInfo(fl)
+                        } else {
+                            InfoText(phone, mood)
+                        }
+                    }
+                    if (mode == Mode.NOTE && cur != null && cur.reply != null) {
+                        Spacer(Modifier.width(10.dp))
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            MiniBtn(L.t("reply_voice"), true) {
+                                Bus.replyTo.value = cur
+                                Bus.startVoice()
+                                activity += 1
+                            }
+                            MiniBtn(L.t("reply_text"), false) {
+                                Bus.replyTo.value = cur
+                                try {
+                                    ctx.startActivity(
+                                        Intent(ctx, ReplyActivity::class.java)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                } catch (e: Exception) {
+                                }
+                                activity += 1
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (mode == Mode.SMALL && md != null && md.playing) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 18.dp)
+            ) {
+                Equalizer(true, 14.dp, Color(md.accent))
+            }
+        } else if (mode == Mode.SMALL && phone.charging) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 14.dp)
+            ) {
+                ChargeRing(phone.battery, 20.dp)
+            }
+        } else if (mode == Mode.SMALL && mood == Mood.SLEEP) {
+            val za by rememberInfiniteTransition(label = "z").animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+                label = "za"
+            )
+            Text(
+                "zZz",
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 14.dp),
+                color = Soft.copy(alpha = za),
+                fontSize = 13.sp,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+    }
+}
+
+private fun mmss(ms: Long): String {
+    val s = (ms / 1000L).coerceAtLeast(0L)
+    return String.format(Locale.US, "%d:%02d", s / 60L, s % 60L)
+}
+
+@Composable
+private fun MusicLayout(md: Media, mood: Mood, tilt: Float, onActivity: () -> Unit) {
+    val accent = Color(md.accent)
+    val art = remember(md.art) { md.art?.asImageBitmap() }
+    var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(md.playing) {
+        while (md.playing) {
+            now = SystemClock.elapsedRealtime()
+            delay(500L)
+        }
+    }
+    val pos = if (md.playing) md.position + ((now - md.posTime) * md.speed).toLong() else md.position
+    val frac = if (md.duration > 0L) (pos.toFloat() / md.duration.toFloat()).coerceIn(0f, 1f) else 0f
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (art != null) {
+                Image(
+                    art,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            } else {
+                Robot(mood, 48.dp, tilt = tilt)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(md.app, color = Soft, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(md.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(md.artist, color = Color(0xFFC9D1DB), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.width(10.dp))
+            Equalizer(md.playing, 22.dp, accent)
+        }
+        if (md.duration > 0L) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(mmss(pos), color = Soft, fontSize = 11.sp)
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.15f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(frac)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(accent)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(mmss(md.duration), color = Soft, fontSize = 11.sp)
+            }
+        }
+        Box(Modifier.fillMa.launch {
                             dragX.snapTo(dragX.value + amount.x)
                             dragY.snapTo((dragY.value + amount.y).coerceAtMost(0f))
                         }
