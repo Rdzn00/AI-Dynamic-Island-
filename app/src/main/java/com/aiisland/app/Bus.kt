@@ -1,8 +1,11 @@
 package com.aiisland.app
 
+import android.app.ActivityOptions
 import android.app.Notification
+import android.app.PendingIntent
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
 import androidx.compose.runtime.mutableStateOf
 
 data class Note(
@@ -11,7 +14,16 @@ data class Note(
     val app: String,
     val title: String,
     val text: String,
-    val reply: Notification.Action?
+    val reply: Notification.Action?,
+    val content: PendingIntent?
+)
+
+data class CallInfo(
+    val key: String,
+    val name: String,
+    val answer: PendingIntent?,
+    val decline: PendingIntent?,
+    val open: PendingIntent?
 )
 
 data class Media(
@@ -35,10 +47,14 @@ object Bus {
     val note = mutableStateOf<Note?>(null)
     val replyTo = mutableStateOf<Note?>(null)
     val flash = mutableStateOf<Flash?>(null)
+    val call = mutableStateOf<CallInfo?>(null)
+    val faceId = mutableStateOf(0L)
+    val textActive = mutableStateOf(false)
     val voice = mutableStateOf(Voice.IDLE)
     val voiceText = mutableStateOf("")
     var startVoice: () -> Unit = {}
     var stopVoice: () -> Unit = {}
+    var endVoice: () -> Unit = {}
     var dismissNote: (Note) -> Unit = {}
     var sendReply: (Note, String) -> Boolean = { _, _ -> false }
 
@@ -50,12 +66,8 @@ object Bus {
     val screenOn = mutableStateOf(true)
     val landscape = mutableStateOf(false)
 
-    val shieldOn = mutableStateOf(true)
-    val banks = mutableStateOf<Set<String>>(emptySet())
-    val banksInit = mutableStateOf(false)
     val blockOn = mutableStateOf(true)
     val blocked = mutableStateOf<Set<String>>(emptySet())
-    val fgPkg = mutableStateOf("")
     val pillW = mutableStateOf(132)
     val pillH = mutableStateOf(38)
 
@@ -70,9 +82,6 @@ object Bus {
         offY.value = p.getInt("y", 8)
         pillW.value = p.getInt("pw", 132)
         pillH.value = p.getInt("ph", 38)
-        shieldOn.value = p.getBoolean("shield", true)
-        banks.value = (p.getStringSet("banks", emptySet()) ?: emptySet()).toSet()
-        banksInit.value = p.getBoolean("banksInit", false)
         blockOn.value = p.getBoolean("block", true)
         blocked.value = (p.getStringSet("blocked", emptySet()) ?: emptySet()).toSet()
         L.lang.value = p.getString("lang", "ms") ?: "ms"
@@ -85,12 +94,23 @@ object Bus {
             .putInt("y", offY.value)
             .putInt("pw", pillW.value)
             .putInt("ph", pillH.value)
-            .putBoolean("shield", shieldOn.value)
-            .putStringSet("banks", banks.value)
-            .putBoolean("banksInit", banksInit.value)
             .putBoolean("block", blockOn.value)
             .putStringSet("blocked", blocked.value)
             .putString("lang", L.lang.value)
             .apply()
+    }
+}
+
+fun firePending(ctx: Context, pi: PendingIntent?) {
+    if (pi == null) return
+    try {
+        if (Build.VERSION.SDK_INT >= 34) {
+            val o = ActivityOptions.makeBasic()
+            o.setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            pi.send(ctx, 0, null, null, null, null, o.toBundle())
+        } else {
+            pi.send()
+        }
+    } catch (e: Exception) {
     }
 }
