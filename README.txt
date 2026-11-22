@@ -1,17 +1,12 @@
-Mochi Dynamic Island v0.5.5 - sandaran kod sumber penuh
-=====================================================
+​🤖 Mochi Dynamic Island
+​Not just another floating pill — your screen just got a personality.
+​Imagine your Android status bar coming alive with a charming little robot buddy that actually reacts to what your phone is doing. Built from the ground up with Kotlin & Jetpack Compose, Mochi Dynamic Island turns everyday alerts, calls, and system states into smooth, expressive visual moments — all wrapped in Mochi’s unmistakable robot identity.  
 
-Isi:
-- app/, build.gradle.kts, settings.gradle.kts, gradle.properties : projek Android (Kotlin + Jetpack Compose), siap untuk dibina.
-- signing/debug.keystore : kunci tandatangan tetap (alias androiddebugkey, kata laluan android).
-  Guna kunci ini pada setiap binaan supaya APK baru boleh dipasang terus di atas yang lama
-  tanpa uninstall dan kebenaran kekal. Letakkan di ~/.android/debug.keystore sebelum bina.
-- ci/github-build.yml : contoh workflow GitHub Actions biasa (tanpa fail teks base64).
-  Salin ke .github/workflows/build.yml dalam repo.
+​Why Mochi Hits Different
+​🎭 A Robot With Real Reactions: Watch Mochi light up for Face ID, respond to incoming calls with quick Accept & Reject controls, and shift expressions across Ringing, Vibrate, and Mute modes.  
 
-Cara bina (mana-mana CI Linux dengan Java 17 + Android SDK + Gradle 8.11.1):
-  1. mkdir -p ~/.android && cp signing/debug.keystore ~/.android/debug.keystore
-  2. gradle assembleDebug
-  3. APK: app/build/outputs/apk/debug/app-debug.apk
+​⚡ Reply Without Breaking Flow: Jump straight into Text or Voice replies right from the Island — record as long as you want with zero 10-second cutoffs, and hit Send only when you’re ready.
 
-Nama pakej: com.aiisland.app. Jangan ubah, supaya kemas kini boleh dipasang di atas app sedia ada.
+​🎯 Tap Straight Into Action: Incoming notification? Tap the Island and land right in the app or sender’s chat without digging through your shade.
+
+​📊 Built for Power Tweakers: Keep noisy apps out with the Application Exclusion List, keep an eye on Battery, RAM, and CPU load at a glance, and stay in full manual contro.
