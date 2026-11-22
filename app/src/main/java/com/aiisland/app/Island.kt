@@ -524,169 +524,6 @@ private fun MusicLayout(md: Media, mood: Mood, tilt: Float, onActivity: () -> Un
                 Text(mmss(md.duration), color = Soft, fontSize = 11.sp)
             }
         }
-        Box(Modifier.fillMa.launch {
-                            dragX.snapTo(dragX.value + amount.x)
-                            dragY.snapTo((dragY.value + amount.y).coerceAtMost(0f))
-                        }
-                    }
-                }
-            }
-    ) {
-        if (mode == Mode.MUSIC && md != null) {
-            MusicLayout(md, mood, phone.tilt) { activity += 1 }
-        } else if (mode == Mode.CHARGE) {
-            ChargeLayout(phone.battery, mood)
-        } else {
-            Row(
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxWidth()
-                    .padding(start = if (mode == Mode.SMALL) 8.dp else 14.dp, end = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Robot(mood, if (mode == Mode.SMALL) (ph * 0.74f).dp else 48.dp, tilt = phone.tilt)
-                if (mode != Mode.SMALL) {
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        if (mode == Mode.NOTE && cur != null) {
-                            NoteInfo(cur)
-                        } else if (mode == Mode.VOICE) {
-                            VoiceInfo(
-                                voice,
-                                voiceText,
-                                replyTo,
-                                {
-                                    val target = Bus.replyTo.value
-                                    val ok = target != null && Bus.sendReply(target, voiceText)
-                                    Bus.voiceText.value = if (ok) L.t("sent") else L.t("send_failed")
-                                    Bus.voice.value = if (ok) Voice.SENT else Voice.ERROR
-                                    activity += 1
-                                },
-                                { close() }
-                            )
-                        } else if (mode == Mode.FLASH && fl != null) {
-                            FlashInfo(fl)
-                        } else {
-                            InfoText(phone, mood)
-                        }
-                    }
-                    if (mode == Mode.NOTE && cur != null && cur.reply != null) {
-                        Spacer(Modifier.width(10.dp))
-                        PillBtn(L.t("reply"), true) {
-                            Bus.replyTo.value = cur
-                            Bus.startVoice()
-                            activity += 1
-                        }
-                    }
-                }
-            }
-        }
-        if (mode == Mode.SMALL && md != null && md.playing) {
-            Box(
-                Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 18.dp)
-            ) {
-                Equalizer(true, 14.dp, Color(md.accent))
-            }
-        } else if (mode == Mode.SMALL && phone.charging) {
-            Box(
-                Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 14.dp)
-            ) {
-                ChargeRing(phone.battery, 20.dp)
-            }
-        } else if (mode == Mode.SMALL && mood == Mood.SLEEP) {
-            val za by rememberInfiniteTransition(label = "z").animateFloat(
-                initialValue = 0.3f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
-                label = "za"
-            )
-            Text(
-                "zZz",
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 14.dp),
-                color = Soft.copy(alpha = za),
-                fontSize = 13.sp,
-                maxLines = 1,
-                softWrap = false
-            )
-        }
-    }
-}
-
-private fun mmss(ms: Long): String {
-    val s = (ms / 1000L).coerceAtLeast(0L)
-    return String.format(Locale.US, "%d:%02d", s / 60L, s % 60L)
-}
-
-@Composable
-private fun MusicLayout(md: Media, mood: Mood, tilt: Float, onActivity: () -> Unit) {
-    val accent = Color(md.accent)
-    val art = remember(md.art) { md.art?.asImageBitmap() }
-    var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(md.playing) {
-        while (md.playing) {
-            now = SystemClock.elapsedRealtime()
-            delay(500L)
-        }
-    }
-    val pos = if (md.playing) md.position + ((now - md.posTime) * md.speed).toLong() else md.position
-    val frac = if (md.duration > 0L) (pos.toFloat() / md.duration.toFloat()).coerceIn(0f, 1f) else 0f
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (art != null) {
-                Image(
-                    art,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-            } else {
-                Robot(mood, 48.dp, tilt = tilt)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(md.app, color = Soft, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(md.title, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(md.artist, color = Color(0xFFC9D1DB), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.width(10.dp))
-            Equalizer(md.playing, 22.dp, accent)
-        }
-        if (md.duration > 0L) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(mmss(pos), color = Soft, fontSize = 11.sp)
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.15f))
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(frac)
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(accent)
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(mmss(md.duration), color = Soft, fontSize = 11.sp)
-            }
-        }
         Box(Modifier.fillMaxWidth()) {
             if (art != null) {
                 Robot(mood, 36.dp, Modifier.align(Alignment.CenterStart), tilt)
@@ -743,6 +580,41 @@ private fun PillBtn(label: String, primary: Boolean, onClick: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )
+    }
+}
+
+@Composable
+private fun MiniBtn(label: String, primary: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .widthIn(min = 68.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (primary) Mint else Color(0xFF2A303B))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = if (primary) Color.Black else Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun ColorBtn(label: String, bg: Color, fg: Color, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(24.dp))
+            .background(bg)
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -858,12 +730,16 @@ private fun NoteInfo(n: Note) {
     }
 }
 
+private fun tail(s: String, n: Int = 90): String {
+    return if (s.length <= n) s else "…" + s.takeLast(n)
+}
+
 @Composable
 private fun VoiceInfo(voice: Voice, text: String, reply: Note?, onSend: () -> Unit, onCancel: () -> Unit) {
     val head = if (voice == Voice.LISTENING) {
         if (reply != null) L.t("reply_to", reply.title) else L.t("listening")
     } else if (voice == Voice.RESULT) {
-        if (reply != null) L.t("send_to", reply.title) else L.t("said")
+        L.t("said")
     } else if (voice == Voice.SENT) {
         L.t("sent")
     } else {
@@ -874,14 +750,146 @@ private fun VoiceInfo(voice: Voice, text: String, reply: Note?, onSend: () -> Un
         if (voice == Voice.LISTENING && text.isEmpty()) {
             Bars()
         } else {
-            Text(text, color = Color.White, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(tail(text), color = Color.White, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
-        if (voice == Voice.RESULT && reply != null && text.isNotEmpty()) {
+        if (voice == Voice.LISTENING) {
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PillBtn(L.t("cancel"), false) { onCancel() }
-                PillBtn(L.t("send"), true) { onSend() }
+                PillBtn(if (reply != null) L.t("send") else L.t("done"), true) { onSend() }
             }
+        }
+    }
+}
+
+@Composable
+private fun CallLayout(c: CallInfo, mood: Mood, tilt: Float) {
+    val ctx = LocalContext.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Robot(mood, 48.dp, tilt = tilt)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(L.t("call_incoming"), color = Soft, fontSize = 12.sp, maxLines = 1)
+                Text(
+                    c.name,
+                    color = Color.White,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (c.decline != null) {
+                ColorBtn(L.t("call_reject"), Color(0xFFFF5A5F), Color.White, Modifier.weight(1f)) {
+                    firePending(ctx, c.decline)
+                }
+            }
+            if (c.answer != null) {
+                ColorBtn(L.t("call_accept"), Color(0xFF34D399), Color.Black, Modifier.weight(1f)) {
+                    firePending(ctx, c.answer)
+                }
+            } else {
+                ColorBtn(L.t("call_open"), Color(0xFF34D399), Color.Black, Modifier.weight(1f)) {
+                    firePending(ctx, c.open)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FaceIdLayout() {
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        p.animateTo(1f, tween(1500, easing = LinearEasing))
+    }
+    val ok = p.value > 0.62f
+    Row(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(62.dp), contentAlignment = Alignment.Center) {
+            Robot(if (ok) Mood.HAPPY else Mood.NEUTRAL, 44.dp)
+            Canvas(Modifier.fillMaxSize()) {
+                val w = this.size.width
+                val h = this.size.height
+                val m = w * 0.04f
+                val len = w * 0.26f
+                val sw = w * 0.055f
+                val col = if (ok) Mint else Color.White
+
+                fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+                    drawLine(col, Offset(x, y), Offset(x + dx * len, y), strokeWidth = sw, cap = StrokeCap.Round)
+                    drawLine(col, Offset(x, y), Offset(x, y + dy * len), strokeWidth = sw, cap = StrokeCap.Round)
+                }
+
+                corner(m, m, 1f, 1f)
+                corner(w - m, m, -1f, 1f)
+                corner(m, h - m, 1f, -1f)
+                corner(w - m, h - m, -1f, -1f)
+                if (!ok) {
+                    val t = p.value / 0.62f
+                    val tri = abs((t * 2f) % 2f - 1f)
+                    val y = m * 2f + (h - 4f * m) * tri
+                    drawLine(
+                        Mint.copy(alpha = 0.9f),
+                        Offset(m * 3f, y),
+                        Offset(w - m * 3f, y),
+                        strokeWidth = sw * 0.7f,
+                        cap = StrokeCap.Round
+                    )
+                } else {
+                    val k = ((p.value - 0.62f) / 0.38f).coerceIn(0f, 1f)
+                    val cx = w * 0.8f
+                    val cy = h * 0.8f
+                    drawCircle(Mint, w * 0.17f * k, Offset(cx, cy))
+                    val f1 = (k * 2f).coerceIn(0f, 1f)
+                    val f2 = (k * 2f - 1f).coerceIn(0f, 1f)
+                    val ax = cx - w * 0.08f
+                    val ay = cy
+                    val bx = cx - w * 0.02f
+                    val byy = cy + w * 0.06f
+                    val ex = cx + w * 0.09f
+                    val ey = cy - w * 0.06f
+                    drawLine(
+                        Color.Black,
+                        Offset(ax, ay),
+                        Offset(ax + (bx - ax) * f1, ay + (byy - ay) * f1),
+                        strokeWidth = sw * 0.8f,
+                        cap = StrokeCap.Round
+                    )
+                    if (f2 > 0f) {
+                        drawLine(
+                            Color.Black,
+                            Offset(bx, byy),
+                            Offset(bx + (ex - bx) * f2, byy + (ey - byy) * f2),
+                            strokeWidth = sw * 0.8f,
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(L.t("faceid_title"), color = Soft, fontSize = 12.sp, maxLines = 1)
+            Text(
+                if (ok) L.t("faceid_ok") else L.t("faceid_scan"),
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
         }
     }
 }
